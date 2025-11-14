@@ -1,9 +1,10 @@
 # =========================
-# app_bien_ban_streamlit.py
+# app_bien_ban_streamlit_fix.py
 # =========================
 import streamlit as st
 from google import genai
 from docx import Document
+import os
 
 # =========================
 # 1) Nhập GEMINI_API_KEY
@@ -16,7 +17,7 @@ if not API_KEY:
 client = genai.Client(api_key=API_KEY)
 
 # =========================
-# 2) Giao diện upload file audio
+# 2) Giao diện upload file hoặc dán văn bản
 # =========================
 st.title("🤖 Trợ Lý Viết Biên Bản (VBI HCM - Gemini)")
 
@@ -49,18 +50,20 @@ if st.button("Soạn thảo biên bản"):
         Văn phong hành chính, rõ ràng, ngắn gọn.
         """
 
+        gem_file = None  # Khởi tạo để xóa tạm nếu có
+
         try:
             # --- Ưu tiên: file audio ---
             if uploaded_file is not None:
                 st.info("Đang upload file audio lên Gemini...")
 
                 # Lưu file tạm trên server Streamlit
-                with open(f"/tmp/{uploaded_file.name}", "wb") as f:
+                tmp_path = f"/tmp/{uploaded_file.name}"
+                with open(tmp_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
-                filepath = f"/tmp/{uploaded_file.name}"
 
                 # Upload lên Gemini
-                gem_file = client.files.upload(file=filepath)
+                gem_file = client.files.upload(file=tmp_path)
 
                 contents = [
                     system_instruction,
@@ -83,6 +86,7 @@ if st.button("Soạn thảo biên bản"):
 
             biens_ban_text = response.text
 
+            # Hiển thị biên bản
             st.subheader("📄 Biên bản hoàn chỉnh")
             st.text_area("Kết quả", biens_ban_text, height=300)
 
@@ -90,5 +94,25 @@ if st.button("Soạn thảo biên bản"):
             doc = Document()
             doc.add_heading('BIÊN BẢN CUỘC HỌP', 0)
             doc.add_paragraph(biens_ban_text)
-            word_filename_
+            word_filename = f"{uploaded_file.name.rsplit('.',1)[0] if uploaded_file else 'BienBan'}_BienBan.docx"
+            word_path = f"/tmp/{word_filename}"
+            doc.save(word_path)
 
+            st.download_button(
+                label="📥 Tải biên bản Word",
+                data=open(word_path, "rb").read(),
+                file_name=word_filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+
+        except Exception as e:
+            st.error(f"Đã xảy ra lỗi: {e}")
+
+        finally:
+            # Xóa file tạm trên Gemini nếu upload audio
+            if gem_file is not None:
+                try:
+                    client.files.delete(name=gem_file.name)
+                    st.success("✅ Đã dọn file tạm trên Gemini.")
+                except Exception as e_del:
+                    st.warning(f"Không xóa được file tạm trên Gemini: {e_del}")
